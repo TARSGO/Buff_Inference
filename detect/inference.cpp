@@ -198,6 +198,26 @@ static void generateYoloxProposals(std::vector<GridAndStride> grid_strides, cons
 
             objects.push_back(obj);
         }
+        std::vector<bbox_t> rst;
+        rst.reserve(TOPK_NUM);
+        std::vector<uint8_t> removed(TOPK_NUM);
+        for (int i = 0; i < TOPK_NUM; i++) {
+            auto *box_buffer = output_buffer + i * 20;  // 20->23
+            if (box_buffer[8] < inv_sigmoid(KEEP_THRES)) break;
+            if (removed[i]) continue;
+            rst.emplace_back();
+            auto &box = rst.back();
+            memcpy(&box.pts, box_buffer, 8 * sizeof(float));
+            for (auto &pt : box.pts) pt.x *= fx, pt.y *= fy;
+            box.confidence = sigmoid(box_buffer[8]);
+            box.color_id = argmax(box_buffer + 9, 4);
+            box.tag_id = argmax(box_buffer + 13, 7);
+            for (int j = i + 1; j < TOPK_NUM; j++) {
+                auto *box2_buffer = output_buffer + j * 20;
+                if (box2_buffer[8] < inv_sigmoid(KEEP_THRES)) break;
+                if (removed[j]) continue;
+                if (is_overlap(box_buffer, box2_buffer)) removed[j] = true;
+            }
 
     } // point anchor loop
 }
