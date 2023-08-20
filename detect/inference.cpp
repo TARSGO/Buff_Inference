@@ -12,13 +12,15 @@
 // static constexpr int INPUT_H = 384;    // Height of input
 static constexpr int INPUT_W = 640;    // Width of input
 static constexpr int INPUT_H = 640;    // Height of input
-static constexpr int NUM_CLASSES = 6;  // Number of classes
+static constexpr int NUM_CLASSES = 3;  // Number of classes
 static constexpr int NUM_COLORS = 2;   // Number of color
 static constexpr int TOPK = 128;       // TopK
 static constexpr float NMS_THRESH  = 0.1;
 static constexpr float BBOX_CONF_THRESH = 0.6;
 static constexpr float MERGE_CONF_ERROR = 0.15;
 static constexpr float MERGE_MIN_IOU = 0.2;
+
+
 
 static inline int argmax(const float *ptr, int len)
 {
@@ -29,42 +31,6 @@ static inline int argmax(const float *ptr, int len)
     return max_arg;
 }
 
-template<class F, class T, class ...Ts>
-T reduce(F &&func, T x, Ts... xs) {
-    if constexpr (sizeof...(Ts) > 0){
-        return func(x, reduce(std::forward<F>(func), xs...));
-    } else {
-        return x;
-    }
-}
-template<class T, class ...Ts>
-T reduce_max(T x, Ts... xs) {
-    return reduce([](auto &&a, auto &&b){return std::max(a, b);}, x, xs...);
-}
-
-template<class T, class ...Ts>
-T reduce_min(T x, Ts... xs) {
-    return reduce([](auto &&a, auto &&b){return std::min(a, b);}, x, xs...);
-}
-static inline bool is_overlap(const float pts1[10], const float pts2[10]) {
-    cv::Rect2f bbox1, bbox2;
-    bbox1.x = reduce_min(pts1[0], pts1[2], pts1[4], pts1[6], pts1[8]);
-    bbox1.y = reduce_min(pts1[1], pts1[3], pts1[5], pts1[7], pts1[9]);
-    bbox1.width = reduce_max(pts1[0], pts1[2], pts1[4], pts1[6], pts1[8]) - bbox1.x;
-    bbox1.height = reduce_max(pts1[1], pts1[3], pts1[5], pts1[7], pts1[9]) - bbox1.y;
-    bbox2.x = reduce_min(pts2[0], pts2[2], pts2[4], pts2[6], pts1[8]);
-    bbox2.y = reduce_min(pts2[1], pts2[3], pts2[5], pts2[7], pts1[9]);
-    bbox2.width = reduce_max(pts2[0], pts2[2], pts2[4], pts2[6], pts1[8]) - bbox2.x;
-    bbox2.height = reduce_max(pts2[1], pts2[3], pts2[5], pts2[7], pts1[9]) - bbox2.y;
-    return (bbox1 & bbox2).area() > 0;
-}
-constexpr float inv_sigmoid(float x) {
-    return -std::log(1 / x - 1);
-}
-
-constexpr float sigmoid(float x) {
-    return 1 / (1 + std::exp(-x));
-}
 
 /**
  * @brief Resize the image using letterbox
@@ -141,32 +107,24 @@ static void generateYoloxProposals(std::vector<GridAndStride> grid_strides, cons
         const int grid1 = grid_strides[anchor_idx].grid1;
         const int stride = grid_strides[anchor_idx].stride;
 
-        const int basic_pos = anchor_idx * (11 + NUM_COLORS + NUM_CLASSES);
 
         // yolox/models/yolo_head.py decode logic
         //  outputs[..., :2] = (outputs[..., :2] + grids) * strides
         //  outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
-        float x_1 = (feat_ptr[basic_pos + 0] + grid0) * stride;
-        float y_1 = (feat_ptr[basic_pos + 1] + grid1) * stride;
-        float x_2 = (feat_ptr[basic_pos + 2] + grid0) * stride;
-        float y_2 = (feat_ptr[basic_pos + 3] + grid1) * stride;
-        float x_3 = (feat_ptr[basic_pos + 4] + grid0) * stride;
-        float y_3 = (feat_ptr[basic_pos + 5] + grid1) * stride;
-        float x_4 = (feat_ptr[basic_pos + 6] + grid0) * stride;
-        float y_4 = (feat_ptr[basic_pos + 7] + grid1) * stride;
-        float x_5 = (feat_ptr[basic_pos + 8] + grid0) * stride;
-        float y_5 = (feat_ptr[basic_pos + 9] + grid1) * stride;
+        float x_1 = (feat_ptr[0] + grid0) * stride;
+        float y_1 = (feat_ptr[1] + grid1) * stride;
+        float x_2 = (feat_ptr[2] + grid0) * stride;
+        float y_2 = (feat_ptr[3] + grid1) * stride;
+        float x_3 = (feat_ptr[4] + grid0) * stride;
+        float y_3 = (feat_ptr[5] + grid1) * stride;
+        float x_4 = (feat_ptr[6] + grid0) * stride;
+        float y_4 = (feat_ptr[7] + grid1) * stride;
+        float x_5 = (feat_ptr[8] + grid0) * stride;
+        float y_5 = (feat_ptr[9] + grid1) * stride;
 
-        int box_color = argmax(feat_ptr + basic_pos + 11, NUM_COLORS);
-        int box_class = argmax(feat_ptr + basic_pos + 11 + NUM_COLORS, NUM_CLASSES);
-
-        float box_objectness = (feat_ptr[basic_pos + 10]);
-
-        float color_conf = (feat_ptr[basic_pos + 11 + box_color]);
-        float cls_conf = (feat_ptr[basic_pos + 11 + NUM_COLORS + box_class]);
-
-        // cout<<box_objectness<<endl;
-        // float box_prob = (box_objectness + cls_conf + color_conf) / 3.0;
+        int box_color = argmax(feat_ptr + 11, NUM_COLORS);
+        int box_class = argmax(feat_ptr + 13, NUM_CLASSES);
+        int box_objectness = sigmoid(feat_ptr[10]);
         float box_prob = box_objectness;
 
         if (box_prob >= prob_threshold)
@@ -199,25 +157,8 @@ static void generateYoloxProposals(std::vector<GridAndStride> grid_strides, cons
             objects.push_back(obj);
         }
         std::vector<bbox_t> rst;
-        rst.reserve(TOPK_NUM);
-        std::vector<uint8_t> removed(TOPK_NUM);
-        for (int i = 0; i < TOPK_NUM; i++) {
-            auto *box_buffer = output_buffer + i * 20;  // 20->23
-            if (box_buffer[8] < inv_sigmoid(KEEP_THRES)) break;
-            if (removed[i]) continue;
-            rst.emplace_back();
-            auto &box = rst.back();
-            memcpy(&box.pts, box_buffer, 8 * sizeof(float));
-            for (auto &pt : box.pts) pt.x *= fx, pt.y *= fy;
-            box.confidence = sigmoid(box_buffer[8]);
-            box.color_id = argmax(box_buffer + 9, 4);
-            box.tag_id = argmax(box_buffer + 13, 7);
-            for (int j = i + 1; j < TOPK_NUM; j++) {
-                auto *box2_buffer = output_buffer + j * 20;
-                if (box2_buffer[8] < inv_sigmoid(KEEP_THRES)) break;
-                if (removed[j]) continue;
-                if (is_overlap(box_buffer, box2_buffer)) removed[j] = true;
-            }
+        rst.reserve(TOPK);
+        std::vector<uint8_t> removed(TOPK);
 
     } // point anchor loop
 }
