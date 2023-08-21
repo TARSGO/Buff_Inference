@@ -16,11 +16,14 @@ static constexpr int NUM_CLASSES = 3;  // Number of classes
 static constexpr int NUM_COLORS = 2;   // Number of color
 static constexpr int TOPK = 128;       // TopK
 static constexpr float NMS_THRESH  = 0.1;
-static constexpr float BBOX_CONF_THRESH = 0.6;
-static constexpr float MERGE_CONF_ERROR = 0.15;
-static constexpr float MERGE_MIN_IOU = 0.2;
+static constexpr float BBOX_CONF_THRESH = 0.1;
+static constexpr float MERGE_CONF_ERROR = 0.1;
+static constexpr float MERGE_MIN_IOU = 0.1;
 
 
+constexpr float sigmoid(float x) {
+    return 1 / (1 + std::exp(-x));
+}
 
 static inline int argmax(const float *ptr, int len)
 {
@@ -107,24 +110,24 @@ static void generateYoloxProposals(std::vector<GridAndStride> grid_strides, cons
         const int grid1 = grid_strides[anchor_idx].grid1;
         const int stride = grid_strides[anchor_idx].stride;
 
-
+        const int basic_pos = anchor_idx * (11 + NUM_COLORS + NUM_CLASSES);
         // yolox/models/yolo_head.py decode logic
         //  outputs[..., :2] = (outputs[..., :2] + grids) * strides
         //  outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
-        float x_1 = (feat_ptr[0] + grid0) * stride;
-        float y_1 = (feat_ptr[1] + grid1) * stride;
-        float x_2 = (feat_ptr[2] + grid0) * stride;
-        float y_2 = (feat_ptr[3] + grid1) * stride;
-        float x_3 = (feat_ptr[4] + grid0) * stride;
-        float y_3 = (feat_ptr[5] + grid1) * stride;
-        float x_4 = (feat_ptr[6] + grid0) * stride;
-        float y_4 = (feat_ptr[7] + grid1) * stride;
-        float x_5 = (feat_ptr[8] + grid0) * stride;
-        float y_5 = (feat_ptr[9] + grid1) * stride;
+        float x_1 = feat_ptr[basic_pos + 0];
+        float y_1 = feat_ptr[basic_pos + 1];
+        float x_2 = feat_ptr[basic_pos + 2];
+        float y_2 = feat_ptr[basic_pos + 3];
+        float x_3 = feat_ptr[basic_pos + 4];
+        float y_3 = feat_ptr[basic_pos + 5];
+        float x_4 = feat_ptr[basic_pos + 6];
+        float y_4 = feat_ptr[basic_pos + 7];
+        float x_5 = feat_ptr[basic_pos + 8];
+        float y_5 = feat_ptr[basic_pos + 9];
 
-        int box_color = argmax(feat_ptr + 11, NUM_COLORS);
-        int box_class = argmax(feat_ptr + 13, NUM_CLASSES);
-        int box_objectness = sigmoid(feat_ptr[10]);
+        int box_color = argmax(feat_ptr + basic_pos + 11, NUM_COLORS);
+        int box_class = argmax(feat_ptr + basic_pos + 13, NUM_CLASSES);
+        int box_objectness = sigmoid(feat_ptr[basic_pos + 10]);
         float box_prob = box_objectness;
 
         if (box_prob >= prob_threshold)
@@ -156,9 +159,6 @@ static void generateYoloxProposals(std::vector<GridAndStride> grid_strides, cons
 
             objects.push_back(obj);
         }
-        std::vector<bbox_t> rst;
-        rst.reserve(TOPK);
-        std::vector<uint8_t> removed(TOPK);
 
     } // point anchor loop
 }
@@ -325,7 +325,7 @@ bool BuffDetector::initModel(string path)
     // .bin files) or ONNX (.onnx file) format
     network = ie.ReadNetwork(path);
     if (network.getOutputsInfo().size() != 1)
-        throw std::logic_error("Sample supports topologies with 1 output only");
+        throw std::logic_error("Sample supports topologies wi th 1 output only");
 
     // Step 2. Configure input & output
     //  Prepare input blobs
