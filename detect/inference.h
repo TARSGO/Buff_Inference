@@ -62,5 +62,11 @@ public:
     bool initModel(string path);
 
 };
+struct GridAndStride
+{
+    int grid0;
+    int grid1;
+    int stride;
+};
 
 #endif //WIND_INFERENCE_INFERENCE_H
